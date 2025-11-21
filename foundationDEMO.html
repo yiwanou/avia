@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Avia Campus - OSM Final</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        /* --- iOS Swift Design System --- */
+        :root {
+            --primary-color: #34C759; /* Apple Green */
+            --accent-color: #007AFF; /* Apple Blue */
+            --text-dark: #1C1C1E;
+            --text-gray: #8E8E93;
+            --bg-ios: #F2F2F7;
+            --glass-bg: rgba(255, 255, 255, 0.85);
+            --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+            --border-radius-lg: 24px;
+            --border-radius-md: 16px;
+            --transition-speed: 0.4s;
+        }
+
+        [data-theme="dark"] {
+            --text-dark: #F2F2F7;
+            --text-gray: #A0A0A5;
+            --glass-bg: rgba(28, 28, 30, 0.85);
+            --bg-ios: #000000;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, sans-serif;
+            margin: 0; padding: 0;
+            background-color: var(--bg-ios);
+            color: var(--text-dark);
+            height: 100vh; width: 100vw;
+            overflow: hidden;
+            transition: background-color var(--transition-speed);
+        }
+
+        .app-container { position: relative; width: 100%; height: 100%; }
+
+        /* --- MAP LAYER (Standard OSM + Dark Mode Filter) --- */
+        #map { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            z-index: 0; background: #ddd; 
+            transition: filter var(--transition-speed);
+        }
+        
+        /* 夜间模式滤镜：把原本白色的 OSM 地图反转颜色，变成深蓝色调 */
+        [data-theme="dark"] #map .leaflet-tile-pane {
+            filter: invert(100%) hue-rotate(180deg) brightness(0.6) contrast(0.9);
+        }
+
+        /* --- Marker Pulsing Animation --- */
+        .custom-pin { position: relative; }
+        .custom-pin::after {
+            content: ''; position: absolute;
+            top: 50%; left: 50%;
+            width: 100%; height: 100%;
+            border-radius: 50%;
+            background: var(--primary-color);
+            opacity: 0.7;
+            transform: translate(-50%, -50%) scale(1);
+            animation: pulse 2s infinite;
+            z-index: -1;
+        }
+        @keyframes pulse {
+            0% { transform: translate(-50%, -50%) scale(1); opacity: 0.7; }
+            70% { transform: translate(-50%, -50%) scale(2.5); opacity: 0; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+        }
+
+        /* --- UI Components --- */
+        .top-bar-container {
+            position: absolute; top: 20px; left: 20px; right: 20px;
+            z-index: 10;
+            display: flex; justify-content: space-between; align-items: flex-start;
+            pointer-events: none; 
+        }
+        .header-card, .simulator-controls {
+            pointer-events: auto;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            box-shadow: var(--card-shadow);
+        }
+        .header-card { padding: 10px 20px; border-radius: 30px; display: flex; align-items: center; gap: 12px; }
+        .logo-svg { width: 32px; height: 32px; fill: var(--primary-color); }
+        .header-title h1 { margin: 0; font-size: 1.1rem; font-weight: 700; }
+
+        .simulator-controls { padding: 6px; border-radius: 30px; display: flex; gap: 8px; }
+        .control-group { display: flex; background: rgba(120,120,128,0.12); border-radius: 20px; padding: 2px; }
+        .toggle-btn {
+            border: none; background: transparent;
+            padding: 6px 12px; border-radius: 18px;
+            font-size: 0.8rem; font-weight: 600;
+            color: var(--text-gray); cursor: pointer; transition: all 0.2s;
+        }
+        .toggle-btn.active { background: white; color: black; box-shadow: 0 2px 4px rgba(0,0,0,0.15); }
+        [data-theme="dark"] .toggle-btn.active { background: #636366; color: white; }
+
+        .map-actions {
+            position: absolute; bottom: 30px; right: 30px; z-index: 10;
+            display: flex; flex-direction: column; gap: 12px;
+        }
+        .action-btn {
+            width: 44px; height: 44px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border-radius: 12px; border: none; box-shadow: var(--card-shadow);
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; color: var(--primary-color);
+            transition: transform 0.1s;
+        }
+        .action-btn:active { transform: scale(0.95); }
+        .action-btn svg { width: 24px; height: 24px; fill: currentColor; }
+
+        /* Sidebar */
+        .sidebar-panel {
+            position: absolute; top: 80px; left: 20px; bottom: 20px;
+            width: 360px; z-index: 9;
+            background: var(--glass-bg);
+            backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+            border-radius: var(--border-radius-lg);
+            box-shadow: var(--card-shadow);
+            padding: 25px;
+            transform: translateX(-120%);
+            transition: transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1), background var(--transition-speed);
+            overflow-y: auto;
+        }
+        .sidebar-panel.open { transform: translateX(0); }
+
+        .visual-container {
+            height: 200px; border-radius: var(--border-radius-md);
+            background-size: cover; background-position: center;
+            position: relative; margin-bottom: 15px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .season-badge {
+            position: absolute; top: 10px; right: 10px;
+            background: rgba(0,0,0,0.6); color: white;
+            padding: 4px 10px; border-radius: 12px;
+            font-size: 0.75rem; font-weight: bold; backdrop-filter: blur(4px);
+        }
+        
+        h2 { margin: 0 0 5px 0; }
+        .latin { color: var(--primary-color); font-weight: 600; font-size: 0.9rem; }
+        .desc { line-height: 1.6; margin-top: 15px; font-size: 0.95rem; }
+        
+        .audio-container {
+            margin-top: 20px; padding: 15px;
+            background: rgba(120,120,128,0.08);
+            border-radius: var(--border-radius-md);
+        }
+        .audio-label { font-size: 0.8rem; font-weight: 700; color: var(--text-gray); margin-bottom: 8px; display: block; }
+        audio { width: 100%; height: 32px; outline: none; }
+        audio::-webkit-media-controls-panel { background: transparent; }
+        audio::-webkit-media-controls-enclosure { border-radius: var(--border-radius-md); }
+
+        @media (max-width: 768px) {
+            .top-bar-container { flex-direction: column; gap: 10px; align-items: flex-start; }
+            .map-actions { bottom: 180px; right: 20px; }
+            .sidebar-panel {
+                top: auto; bottom: 0; left: 0; right: 0; width: 100%;
+                border-radius: 24px 24px 0 0;
+                transform: translateY(120%); height: auto; max-height: 60vh;
+            }
+            .sidebar-panel.open { transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <div id="map"></div>
+
+    <div class="top-bar-container">
+        <div class="header-card">
+            <svg class="logo-svg" viewBox="0 0 50 50">
+                <circle cx="25" cy="25" r="20" fill="none" stroke="currentColor" stroke-width="2.5" opacity="0.3"/>
+                <path d="M38.5,18 C35,20 30,22 25,22 C20,22 15,16 12,14 C11,13.3 10,14 10.5,15 C12,18 16,24 20,28 C22,30 24,34 23,38 C22.5,40 24,41 25,39 C27,35 32,30 36,26 C38,24 40,20 38.5,18 Z" fill="currentColor"/>
+            </svg>
+            <div class="header-title">
+                <h1>Avia Campus</h1>
+            </div>
+        </div>
+
+        <div class="simulator-controls">
+            <div class="control-group">
+                <button class="toggle-btn active" onclick="setSeason('spring')">Printemps</button>
+                <button class="toggle-btn" onclick="setSeason('winter')">Hiver</button>
+            </div>
+            <div class="control-group">
+                <button class="toggle-btn active" onclick="setTheme('light')">☀</button>
+                <button class="toggle-btn" onclick="setTheme('dark')">☾</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="map-actions">
+        <button class="action-btn" onclick="zoomMap(1)">+</button>
+        <button class="action-btn" onclick="zoomMap(-1)">-</button>
+        <button class="action-btn" onclick="resetToInsa()" title="Retour Campus INSA" style="color: var(--accent-color)">
+            <svg viewBox="0 0 24 24"><path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4zm8.94 3c-.46-4.17-3.77-7.48-7.94-7.94V1h-2v2.06C6.83 3.52 3.52 6.83 3.06 11H1v2h2.06c.46 4.17 3.77 7.48 7.94 7.94V23h2v-2.06c4.17-.46 7.48-3.77 7.94-7.94H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg>
+        </button>
+    </div>
+
+    <div class="sidebar-panel" id="sidebar">
+        <div id="bird-content" class="bird-card">
+            <div class="visual-container" id="bird-bg">
+                <span class="season-badge" id="season-badge">Printemps</span>
+            </div>
+            <h2 id="bird-name"></h2>
+            <div class="latin" id="bird-latin"></div>
+            
+            <div class="audio-container">
+                <span class="audio-label">ÉCOUTER LE CHANT (Simulation)</span>
+                <audio id="bird-audio" controls controlsList="nodownload noplaybackrate">
+                    Votre navigateur ne supporte pas l'élément audio.
+                </audio>
+            </div>
+
+            <p class="desc" id="bird-desc"></p>
+            
+            <div style="margin-top:20px; font-size:0.8rem; color:var(--text-gray);">
+                <strong style="color:var(--primary-color)">Note:</strong> Le changement de saison modifie les données affichées (comportement/habitat).
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // --- 配置 ---
+    const INSA_COORDS = [45.7825, 4.8765]; 
+    let currentSeason = 'spring';
+    
+    // 1. 初始化地图 (使用 OpenStreetMap 官方源)
+    const map = L.map('map', { zoomControl: false }).setView(INSA_COORDS, 14);
+    
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 19,
+        minZoom: 12
+    }).addTo(map);
+
+    // 2. 数据更新
+    const birdData = {
+        1: {
+            name: "Héron Cendré",
+            latin: "Ardea cinerea",
+            img: "https://images.unsplash.com/photo-1580708023881-86414774881f?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80",
+            audio: "https://xeno-canto.org/sounds/uploaded/SDPCHKOHRH/XC473354-190505_1114_Ardea_cinerea.mp3",
+            desc: {
+                spring: "Activité : <strong style='color:#34C759'>Nidification (Tête d'Or)</strong>. Ils construisent leurs grands nids en haut des arbres sur l'île aux oiseaux du lac. Les allers-retours sont fréquents.",
+                winter: "Activité : <strong style='color:#007AFF'>Pêche statique</strong>. Immobile au bord de l'eau glacée, attendant une proie. Son métabolisme ralentit.",
+            }
+        },
+        2: {
+            name: "Martin-Pêcheur",
+            latin: "Alcedo atthis",
+            img: "https://images.unsplash.com/photo-1616698157432-88c775365d73?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80",
+            audio: "https://xeno-canto.org/sounds/uploaded/BVMONBWXSI/XC666543-210704_064751_eisvogel.mp3",
+            desc: {
+                spring: "Activité : <strong style='color:#34C759'>Parade nuptiale (Feyssine)</strong>. Des sifflements aigus et rapides le long des berges du Rhône. Ils creusent des terriers dans les berges sablonneuses.",
+                winter: "Activité : <strong style='color:#007AFF'>Solitaire</strong>. Plus discret, il défend un territoire de pêche vital pour passer l'hiver.",
+            }
+        }
+    };
+
+    // 3. 交互逻辑
+    let activeBirdId = null;
+    
+    const createIcon = (color) => L.divIcon({
+        className: 'custom-pin',
+        html: `<div style="background:${color}; width:22px; height:22px; border:3px solid white; border-radius:50%; box-shadow:0 4px 10px rgba(0,0,0,0.3); position:relative; z-index:2;"></div>`,
+        iconSize: [28, 28]
+    });
+
+    const markers = [
+        // Tête d'Or (Héron)
+        { id: 1, lat: 45.7795, lng: 4.8530 },
+        // Feyssine (Martin-Pêcheur)
+        { id: 2, lat: 45.7885, lng: 4.8820 }
+    ];
+
+    markers.forEach(m => {
+        L.marker([m.lat, m.lng], {icon: createIcon('#34C759')}).addTo(map).on('click', () => {
+            activeBirdId = m.id;
+            updateSidebar();
+            document.getElementById('sidebar').classList.add('open');
+            map.flyTo([m.lat - 0.003, m.lng], 15, { duration: 1.2 });
+        });
+    });
+
+    function updateSidebar() {
+        if (!activeBirdId) return;
+        const data = birdData[activeBirdId];
+        document.getElementById('bird-name').innerText = data.name;
+        document.getElementById('bird-latin').innerText = data.latin;
+        document.getElementById('bird-bg').style.backgroundImage = `url('${data.img}')`;
+        document.getElementById('bird-desc').innerHTML = data.desc[currentSeason];
+        document.getElementById('season-badge').innerText = currentSeason === 'spring' ? 'Printemps' : 'Hiver';
+        
+        const audioPlayer = document.getElementById('bird-audio');
+        audioPlayer.src = data.audio;
+        audioPlayer.load(); 
+    }
+
+    window.zoomMap = (d) => map.setZoom(map.getZoom() + d);
+    window.resetToInsa = () => {
+        map.flyTo(INSA_COORDS, 14, { duration: 1.5 });
+        document.getElementById('sidebar').classList.remove('open');
+        document.getElementById('bird-audio').pause();
+    };
+
+    window.setSeason = (season) => {
+        currentSeason = season;
+        document.querySelectorAll('.control-group:first-child .toggle-btn').forEach(btn => btn.classList.remove('active'));
+        event.target.classList.add('active');
+        updateSidebar();
+    };
+
+    window.setTheme = (theme) => {
+        document.body.setAttribute('data-theme', theme);
+        document.querySelectorAll('.control-group:last-child .toggle-btn').forEach(btn => btn.classList.remove('active'));
+        event.target.classList.add('active');
+    };
+</script>
+</body>
+</html>
